@@ -28,7 +28,7 @@ import (
 func main() {
     kv := minikv.New(5*time.Minute, 10*time.Minute)
 
-    // Listen to what has been removed or expired
+    // Listen to what has been removed or expired (except .Flush()'ed)
     kv.OnEvicted(func(key string, value interface{}) {
         fmt.Println(key, "has been evicted")
     })
