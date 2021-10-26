@@ -21,6 +21,11 @@ type Item struct {
 	Expiration int64
 }
 
+func (item Item) Expired() bool {
+	now := time.Now().UnixNano()
+	return now > item.Expiration
+}
+
 type KV struct {
 	defaultExpiration time.Duration
 	cleanupInterval   time.Duration
