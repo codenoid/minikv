@@ -28,6 +28,11 @@ import (
 func main() {
     kv := minikv.New(5*time.Minute, 10*time.Minute)
 
+    // Listen to what has been removed or expired
+    kv.OnEvicted(func(key string, value interface{}) {
+        fmt.Println(key, "has been evicted")
+    })
+
     // Set the value of the key "foo" to "bar", with the default expiration time
     // which is 5*time.Minute
     kv.Set("foo", "bar", cache.DefaultExpiration)
