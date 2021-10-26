@@ -1,5 +1,7 @@
 # MiniKV
 
+![Go Test](https://github.com/codenoid/minikv/actions/workflows/go.yml/badge.svg)
+
 Rewriten from [patrickmn/go-cache](https://github.com/patrickmn/go-cache) with sync.Map and expected behavior (drop-in replacement).
 
 minikv is an in-memory key:value store/cache that is suitable for applications running on a single machine. Its major advantage is that, being essentially a thread-safe map[string]interface{} with expiration times, it doesn't need to serialize or transmit its contents over the network.
@@ -30,10 +32,10 @@ func main() {
     // which is 5*time.Minute
     kv.Set("foo", "bar", cache.DefaultExpiration)
 
-	// Get the string associated with the key "foo" from the cache
-	foo, found := c.Get("foo")
-	if found {
-		fmt.Println(foo)
-	}
+    // Get the string associated with the key "foo" from the cache
+    foo, found := c.Get("foo")
+    if found {
+        fmt.Println(foo)
+    }
 }
 ```
