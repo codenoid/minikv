@@ -192,6 +192,13 @@ func (kv *KV) DeleteExpired() {
 	})
 }
 
+func (kv *KV) Flush() {
+	kv.items.Range(func(key interface{}, value interface{}) bool {
+		kv.items.Delete(key)
+		return true
+	})
+}
+
 func (kv *KV) runJanitor() {
 	if kv.cleanupInterval != NoExpiration {
 		ticker := time.NewTicker(kv.cleanupInterval)
