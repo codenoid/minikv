@@ -26,9 +26,11 @@ import (
 )
 
 func main() {
+    // Auto mark key as expired after 5*time.Minute, purge any expired key every
+    // 10*time.Minute
     kv := minikv.New(5*time.Minute, 10*time.Minute)
 
-    // Listen to what has been removed or expired (except .Flush()'ed)
+    // Listen to what has been removed and cleaned up (not expired or .Flush()'ed)
     kv.OnEvicted(func(key string, value interface{}) {
         fmt.Println(key, "has been evicted")
     })
