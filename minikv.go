@@ -74,6 +74,21 @@ func (kv *KV) Set(key string, value interface{}, exp time.Duration) {
 	kv.items.Store(key, item)
 }
 
+func (kv *KV) Update(key string, value interface{}) error {
+
+	item := Item{}
+	if obj, ok := kv.items.Load(key); ok {
+		item = obj.(Item)
+	} else {
+		return errors.New("object doesn't exist")
+	}
+
+	item.Object = value
+	kv.items.Store(key, item)
+
+	return nil
+}
+
 func (kv *KV) Get(key string) (interface{}, bool) {
 
 	now := time.Now().UnixNano()
