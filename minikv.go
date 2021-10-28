@@ -31,6 +31,7 @@ type KV struct {
 	cleanupInterval   time.Duration
 	items             sync.Map
 	mu                sync.RWMutex
+	onDeleted         func(string, interface{})
 	onEvicted         func(string, interface{})
 }
 
@@ -49,6 +50,12 @@ func New(defaultExpiration, cleanupInterval time.Duration) *KV {
 func (kv *KV) OnEvicted(f func(string, interface{})) {
 	kv.mu.Lock()
 	kv.onEvicted = f
+	kv.mu.Unlock()
+}
+
+func (kv *KV) OnDeleted(f func(string, interface{})) {
+	kv.mu.Lock()
+	kv.onDeleted = f
 	kv.mu.Unlock()
 }
 
@@ -107,8 +114,8 @@ func (kv *KV) Delete(key string) error {
 
 	if obj, ok := kv.items.Load(key); ok {
 		val := obj.(Item)
-		if kv.onEvicted != nil {
-			go kv.onEvicted(key, val.Object)
+		if kv.onDeleted != nil {
+			go kv.onDeleted(key, val.Object)
 		}
 		kv.items.Delete(key)
 	} else {
@@ -206,7 +213,10 @@ func (kv *KV) DeleteExpired() {
 	kv.items.Range(func(key interface{}, value interface{}) bool {
 		item := value.(Item)
 		if now > item.Expiration {
-			kv.Delete(key.(string))
+			if kv.onEvicted != nil {
+				go kv.onEvicted(item.Key, item.Object)
+			}
+			kv.items.Delete(key)
 		}
 		return true
 	})
