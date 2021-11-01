@@ -15,6 +15,16 @@ const (
 	DefaultExpiration time.Duration = 0
 )
 
+type meta struct {
+	Key        string
+	Expiration int64
+}
+
+type updateMeta struct {
+	meta
+	PriorExpiration int64
+}
+
 type Item struct {
 	Key        string
 	Object     interface{}
@@ -33,6 +43,12 @@ type KV struct {
 	mu                sync.RWMutex
 	onDeleted         func(string, interface{})
 	onEvicted         func(string, interface{})
+
+	metaAdd    chan meta
+	metaUpdate chan updateMeta
+	metaDelete chan meta
+
+	exp map[int64]map[string]*struct{}
 }
 
 func New(defaultExpiration, cleanupInterval time.Duration) *KV {
@@ -40,6 +56,11 @@ func New(defaultExpiration, cleanupInterval time.Duration) *KV {
 	new := KV{
 		defaultExpiration: defaultExpiration,
 		cleanupInterval:   cleanupInterval,
+		//TODO: configure capacities
+		metaAdd:    make(chan meta, 10),
+		metaUpdate: make(chan updateMeta, 10),
+		metaDelete: make(chan meta, 10),
+		exp:        make(map[int64]map[string]*struct{}),
 	}
 
 	go new.runJanitor()
@@ -78,7 +99,29 @@ func (kv *KV) Set(key string, value interface{}, exp time.Duration) {
 		Expiration: expiredAt,
 		Object:     value,
 	}
-	kv.items.Store(key, item)
+
+	if prior, found := kv.items.Load(key); !found {
+		kv.items.Store(key, item)
+
+		kv.metaAdd <- meta{
+			Key:        item.Key,
+			Expiration: item.Expiration,
+		}
+	} else {
+		priorItem := prior.(Item)
+
+		kv.items.Store(key, item)
+
+		if item.Expiration != priorItem.Expiration {
+			kv.metaUpdate <- updateMeta{
+				meta: meta{
+					Key:        key,
+					Expiration: expiredAt,
+				},
+				PriorExpiration: priorItem.Expiration,
+			}
+		}
+	}
 }
 
 func (kv *KV) Update(key string, value interface{}) error {
@@ -92,6 +135,11 @@ func (kv *KV) Update(key string, value interface{}) error {
 
 	item.Object = value
 	kv.items.Store(key, item)
+
+	kv.metaAdd <- meta{
+		Key:        item.Key,
+		Expiration: item.Expiration,
+	}
 
 	return nil
 }
@@ -111,7 +159,18 @@ func (kv *KV) Get(key string) (interface{}, bool) {
 }
 
 func (kv *KV) Delete(key string) error {
+	itm, err := kv.deleteInner(key)
+	if err != nil {
+		return err
+	}
+	kv.metaDelete <- meta{
+		Key:        itm.Key,
+		Expiration: itm.Expiration,
+	}
+	return nil
+}
 
+func (kv *KV) deleteInner(key string) (val Item, err error) {
 	if obj, ok := kv.items.Load(key); ok {
 		val := obj.(Item)
 		if kv.onDeleted != nil {
@@ -119,10 +178,9 @@ func (kv *KV) Delete(key string) error {
 		}
 		kv.items.Delete(key)
 	} else {
-		return errors.New("key args not exist")
+		return val, errors.New("key args not exist")
 	}
-
-	return nil
+	return val, err
 }
 
 func (kv *KV) List() map[string]Item {
@@ -209,17 +267,25 @@ func (kv *KV) ItemCountAll() int {
 func (kv *KV) DeleteExpired() {
 
 	now := time.Now().UnixNano()
+	var expired int64
 
-	kv.items.Range(func(key interface{}, value interface{}) bool {
-		item := value.(Item)
-		if now > item.Expiration {
-			if kv.onEvicted != nil {
-				go kv.onEvicted(item.Key, item.Object)
+	for expiration, keys := range kv.exp {
+		if expiration < now && len(keys) > 0 {
+			for k, _ := range keys {
+				// dont send metadata updates for janitor
+				itm, err := kv.deleteInner(k)
+
+				if err == nil && kv.onEvicted != nil {
+					go kv.onEvicted(itm.Key, itm.Expiration)
+				}
 			}
-			kv.items.Delete(key)
+
+			expired = expiration
+			break //TODO: only going to process first non-empty item in map on each pass, be nice to enforce ordering
 		}
-		return true
-	})
+	}
+
+	delete(kv.exp, expired)
 }
 
 func (kv *KV) Flush() {
@@ -230,9 +296,33 @@ func (kv *KV) Flush() {
 }
 
 func (kv *KV) runJanitor() {
-	if kv.cleanupInterval != NoExpiration {
-		ticker := time.NewTicker(kv.cleanupInterval)
-		for range ticker.C {
+	for {
+		select {
+		case lm := <-kv.metaAdd:
+			if curr, found := kv.exp[lm.Expiration]; found {
+				curr[lm.Key] = &struct{}{}
+				kv.exp[lm.Expiration] = curr
+			} else {
+				kv.exp[lm.Expiration] = map[string]*struct{}{lm.Key: {}}
+			}
+		case mu := <-kv.metaUpdate:
+			if curr, found := kv.exp[mu.PriorExpiration]; found {
+				delete(curr, mu.Key)
+				kv.exp[mu.PriorExpiration] = curr
+			}
+
+			if curr, found := kv.exp[mu.Expiration]; found {
+				curr[mu.Key] = &struct{}{}
+				kv.exp[mu.Expiration] = curr
+			} else {
+				kv.exp[mu.Expiration] = map[string]*struct{}{mu.Key: {}}
+			}
+		case md := <-kv.metaDelete:
+			if curr, found := kv.exp[md.Expiration]; found {
+				delete(curr, md.Key)
+				kv.exp[md.Expiration] = curr
+			}
+		default:
 			kv.DeleteExpired()
 		}
 	}

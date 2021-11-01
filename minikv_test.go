@@ -31,7 +31,7 @@ func TestJanitor(t *testing.T) {
 
 	kv.Set("name", "mike", DefaultExpiration)
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	if kv.ItemCountAll() != 1 {
 		t.Error("key should be still exist")
