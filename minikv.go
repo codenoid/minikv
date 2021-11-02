@@ -2,6 +2,7 @@ package minikv
 
 import (
 	"errors"
+	"sort"
 	"sync"
 	"time"
 )
@@ -269,19 +270,30 @@ func (kv *KV) DeleteExpired() {
 	now := time.Now().UnixNano()
 	var expired int64
 
-	for expiration, keys := range kv.exp {
-		if expiration < now && len(keys) > 0 {
-			for k, _ := range keys {
-				// dont send metadata updates for janitor
-				itm, err := kv.deleteInner(k)
+	keys := make([]int64, 0, len(kv.exp))
+	for k := range kv.exp {
+		keys = append(keys, k)
+	}
 
-				if err == nil && kv.onEvicted != nil {
-					go kv.onEvicted(itm.Key, itm.Expiration)
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+
+	for _, expiration := range keys {
+		if expiration < now {
+			expiredKeys := kv.exp[expiration]
+
+			if len(expiredKeys) > 0 {
+				for k, _ := range expiredKeys {
+					// dont send metadata updates for janitor
+					itm, err := kv.deleteInner(k)
+
+					if err == nil && kv.onEvicted != nil {
+						go kv.onEvicted(itm.Key, itm.Expiration)
+					}
 				}
 			}
 
 			expired = expiration
-			break //TODO: only going to process first non-empty item in map on each pass, be nice to enforce ordering
+			break
 		}
 	}
 
@@ -298,12 +310,12 @@ func (kv *KV) Flush() {
 func (kv *KV) runJanitor() {
 	for {
 		select {
-		case lm := <-kv.metaAdd:
-			if curr, found := kv.exp[lm.Expiration]; found {
-				curr[lm.Key] = &struct{}{}
-				kv.exp[lm.Expiration] = curr
+		case ma := <-kv.metaAdd:
+			if curr, found := kv.exp[ma.Expiration]; found {
+				curr[ma.Key] = &struct{}{}
+				kv.exp[ma.Expiration] = curr
 			} else {
-				kv.exp[lm.Expiration] = map[string]*struct{}{lm.Key: {}}
+				kv.exp[ma.Expiration] = map[string]*struct{}{ma.Key: {}}
 			}
 		case mu := <-kv.metaUpdate:
 			if curr, found := kv.exp[mu.PriorExpiration]; found {
