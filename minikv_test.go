@@ -20,6 +20,27 @@ func TestExistence(t *testing.T) {
 	}
 }
 
+func TestExistence_NoExpiration(t *testing.T) {
+	kv := New(5*time.Second, 1 * time.Second)
+
+	kv.Set("name", "mike", NoExpiration)
+	if kv.IsExist("name") != true {
+		t.Error("name should exist (called before expired / deletion)")
+	}
+
+	time.Sleep(1500 * time.Millisecond)
+
+	if kv.IsExist("name") == false {
+		t.Error("Lost key that should be present: name")
+	}
+
+	kv.Delete("name")
+
+	if kv.IsExist("name") == true {
+		t.Error("Found key that should be removed: name")
+	}
+}
+
 func TestJanitor(t *testing.T) {
 
 	onEvictCalled := false

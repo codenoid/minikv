@@ -14,6 +14,9 @@ const (
 	// passing in the same expiration duration as was given to New() or
 	// NewFrom() when the cache was created (e.g. 5 minutes.)
 	DefaultExpiration time.Duration = 0
+
+	// Value stored in map for filtering
+	noExpiration int64 = 0
 )
 
 type meta struct {
@@ -34,7 +37,7 @@ type Item struct {
 
 func (item Item) Expired() bool {
 	now := time.Now().UnixNano()
-	return now > item.Expiration
+	return item.Expiration != noExpiration && now > item.Expiration
 }
 
 type KV struct {
@@ -151,7 +154,7 @@ func (kv *KV) Get(key string) (interface{}, bool) {
 
 	if obj, ok := kv.items.Load(key); ok {
 		val := obj.(Item)
-		if val.Expiration > now {
+		if val.Expiration == noExpiration || val.Expiration > now {
 			return val.Object, true
 		}
 	}
@@ -191,7 +194,7 @@ func (kv *KV) List() map[string]Item {
 
 	kv.items.Range(func(key interface{}, value interface{}) bool {
 		item := value.(Item)
-		if item.Expiration > now {
+		if item.Expiration == noExpiration || item.Expiration > now {
 			m[item.Key] = item
 		}
 		return true
@@ -217,7 +220,7 @@ func (kv *KV) IsExist(key string) bool {
 
 	if obj, ok := kv.items.Load(key); ok {
 		val := obj.(Item)
-		if val.Expiration > now {
+		if val.Expiration == noExpiration || val.Expiration > now {
 			return true
 		}
 	}
@@ -230,7 +233,7 @@ func (kv *KV) IsExpired(key string) (bool, error) {
 
 	if obj, ok := kv.items.Load(key); ok {
 		val := obj.(Item)
-		if val.Expiration > now {
+		if val.Expiration == noExpiration || val.Expiration > now {
 			return false, nil
 		}
 		return true, nil
@@ -243,9 +246,10 @@ func (kv *KV) ItemCount() int {
 	total := 0
 
 	now := time.Now().UnixNano()
+
 	kv.items.Range(func(key interface{}, value interface{}) bool {
 		item := value.(Item)
-		if item.Expiration > now {
+		if item.Expiration == noExpiration || item.Expiration > now {
 			total++
 		}
 		return true
@@ -278,7 +282,7 @@ func (kv *KV) DeleteExpired() {
 	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 
 	for _, expiration := range keys {
-		if expiration < now {
+		if expiration != noExpiration && expiration < now {
 			expiredKeys := kv.exp[expiration]
 
 			if len(expiredKeys) > 0 {
